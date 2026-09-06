@@ -33,6 +33,8 @@ class FrozenLabelTextEncoder(nn.Module):
 
 
 class FiLM(nn.Module):
+    """Feature-wise modulation conditioned on label and latent vectors."""
+
     def __init__(self, channels: int, cond_dim: int) -> None:
         super().__init__()
         self.net = nn.Sequential(
@@ -49,6 +51,8 @@ class FiLM(nn.Module):
 
 
 class ResBlock(nn.Module):
+    """Residual convolution block with FiLM conditioning."""
+
     def __init__(self, channels: int, cond_dim: int) -> None:
         super().__init__()
         self.norm1 = nn.GroupNorm(8, channels)
@@ -71,8 +75,7 @@ class ConditionalPhaseUNet(nn.Module):
         0: initial phase phi_0
         1..L: diffractive phase masks psi_l
 
-    Diversity is injected through both a spatial noise seed and a latent vector.
-    No discriminator is used anywhere in this model.
+    Diversity is injected through both a spatial optical seed and a latent code.
     """
 
     def __init__(
@@ -93,7 +96,6 @@ class ConditionalPhaseUNet(nn.Module):
             nn.Linear(cond_dim, cond_dim),
         )
 
-        # Input map plus two coordinate channels.
         self.in_conv = nn.Conv2d(3, base_channels, 3, padding=1)
         self.rb1 = ResBlock(base_channels, cond_dim)
         self.down1 = nn.Conv2d(base_channels, base_channels * 2, 4, stride=2, padding=1)
@@ -149,11 +151,12 @@ class ConditionalPhaseUNet(nn.Module):
 
 
 class PFMGenerator(nn.Module):
-    """No-GAN Photonic Flow Matching generator.
+    """Photonic Flow Matching generator.
 
     The generator returns a normalized output intensity and intermediate optical
-    fields. All learned controllability is in the phase generator; image
-    formation itself is performed by differentiable angular-spectrum propagation.
+    fields. Learned controllability is represented by input-dependent phase
+    maps, while image formation is performed by differentiable angular-spectrum
+    propagation.
     """
 
     def __init__(
