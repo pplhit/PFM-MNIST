@@ -67,7 +67,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ckpt", type=str, required=True)
     parser.add_argument("--label", type=str, default="all")
     parser.add_argument("--n-samples", type=int, default=40)
-    parser.add_argument("--out-dir", type=str, default="runs/pfm_mnist_diverse/samples")
+    parser.add_argument("--out-dir", type=str, default="runs/pfm_mnist/samples")
     parser.add_argument("--photon-decode", action="store_true")
     parser.add_argument("--n-photons", type=int, default=100000)
     parser.add_argument("--cpu", action="store_true")
