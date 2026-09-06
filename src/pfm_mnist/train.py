@@ -54,8 +54,8 @@ def save_checkpoint(
 
 def compute_pfm_loss(
     generator: PFMGenerator,
-    fake_a: torch.Tensor,
-    fake_b: torch.Tensor,
+    pred_a: torch.Tensor,
+    pred_b: torch.Tensor,
     real: torch.Tensor,
     info_a: dict[str, Any],
     latent_a: torch.Tensor,
@@ -65,13 +65,13 @@ def compute_pfm_loss(
     loss_cfg = config["loss"]
 
     l_density = endpoint_density_loss(
-        fake_a,
+        pred_a,
         real,
         target_floor=float(loss_cfg["target_floor"]),
         blur_sigma=float(loss_cfg["target_blur_sigma"]),
     )
     l_ms = multiscale_density_loss(
-        fake_a,
+        pred_a,
         real,
         target_floor=float(loss_cfg["target_floor"]),
         blur_sigma=float(loss_cfg["target_blur_sigma"]),
@@ -95,14 +95,14 @@ def compute_pfm_loss(
         dz=generator.dz,
     )
     l_div = diversity_loss(
-        fake_a,
-        fake_b,
+        pred_a,
+        pred_b,
         latent_a,
         latent_b,
         margin=float(loss_cfg["diversity_margin"]),
     )
     l_anti = anti_collapse_loss(
-        fake_a,
+        pred_a,
         real,
         lambda_ipr=float(loss_cfg["lambda_ipr"]),
         lambda_peak=float(loss_cfg["lambda_peak"]),
@@ -187,12 +187,12 @@ def train(config: dict[str, Any], overrides: argparse.Namespace) -> None:
             latent_b = generator.sample_latent(real.shape[0], device)
 
             with torch.cuda.amp.autocast(enabled=bool(config["train"]["amp"]) and device.type == "cuda"):
-                fake_a, info_a = generator(seed_a, labels, latent=latent_a, return_fields=True)
-                fake_b = generator(seed_b, labels, latent=latent_b, return_fields=False)
+                pred_a, info_a = generator(seed_a, labels, latent=latent_a, return_fields=True)
+                pred_b = generator(seed_b, labels, latent=latent_b, return_fields=False)
                 loss, stats = compute_pfm_loss(
                     generator=generator,
-                    fake_a=fake_a,
-                    fake_b=fake_b,
+                    pred_a=pred_a,
+                    pred_b=pred_b,
                     real=real,
                     info_a=info_a,
                     latent_a=latent_a,
@@ -218,13 +218,13 @@ def train(config: dict[str, Any], overrides: argparse.Namespace) -> None:
             if step % int(config["train"]["vis_every"]) == 0:
                 generator.eval()
                 with torch.no_grad():
-                    fake, info = generator(
+                    pred, info = generator(
                         fixed_seed,
                         fixed_labels,
                         latent=fixed_latent,
                         return_fields=True,
                     )
-                    grid = make_grid(normalize_for_display(fake), nrow=10, padding=2)
+                    grid = make_grid(normalize_for_display(pred), nrow=10, padding=2)
                     save_image(grid, image_dir / f"sample_step_{step:07d}.png")
 
                     phase = normalize_for_display(info["phase_maps"][:1])
@@ -239,7 +239,7 @@ def train(config: dict[str, Any], overrides: argparse.Namespace) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser("Train no-GAN PFM on MNIST")
+    parser = argparse.ArgumentParser("Train PFM on MNIST")
     parser.add_argument("--config", type=str, default="configs/default.yaml")
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--lambda-diversity", type=float, default=None)
