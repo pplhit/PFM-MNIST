@@ -1,6 +1,6 @@
 seed: 42
 data_root: ./data
-run_dir: ./runs/pfm_mnist_nogan
+run_dir: ./runs/pfm_mnist
 
 model:
   size: 64
@@ -31,9 +31,9 @@ train:
 loss:
   lambda_density: 1.0
   lambda_multiscale: 0.35
-  lambda_flow: 0.08
-  lambda_tie: 0.02
-  lambda_diversity: 0.18
+  lambda_flow: 0.02
+  lambda_tie: 0.01
+  lambda_diversity: 0.16
   lambda_ipr: 0.05
   lambda_peak: 0.03
   lambda_phase_tv: 1.5e-4
