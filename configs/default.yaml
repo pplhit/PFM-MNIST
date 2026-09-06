@@ -1,0 +1,43 @@
+seed: 42
+data_root: ./data
+run_dir: ./runs/pfm_mnist_diverse
+
+model:
+  size: 64
+  text_dim: 64
+  latent_dim: 64
+  num_layers: 4
+  base_channels: 64
+  wavelength: 6.35e-7
+  dx: 3.6e-6
+  dz: 0.04
+  pad_factor: 2
+  source_floor: 0.03
+  phase_scale: 3.141592653589793
+
+train:
+  epochs: 80
+  batch_size: 64
+  num_workers: 2
+  lr_g: 2.0e-4
+  lr_d: 2.0e-4
+  weight_decay: 1.0e-4
+  grad_clip: 1.0
+  amp: false
+  vis_every: 500
+  save_every: 1
+  t_min: 0.75
+  pure_noise_prob: 0.45
+  d_steps: 1
+
+loss:
+  lambda_adv: 0.10
+  lambda_feature: 5.0
+  lambda_density: 0.25
+  lambda_diversity: 0.16
+  lambda_ipr: 0.05
+  lambda_peak: 0.03
+  lambda_phase_tv: 1.5e-4
+  target_floor: 1.0e-4
+  target_blur_sigma: 0.6
+  diversity_margin: 0.08
