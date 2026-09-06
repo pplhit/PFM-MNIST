@@ -2,7 +2,7 @@
 
 A GitHub-ready PyTorch implementation of **Photonic Flow Matching (PFM)** for MNIST generation.
 
-This repository deliberately keeps the training objective in the **flow-matching / photon-density-transport** family. It does **not** use GAN loss or a discriminator. The core process is:
+This repository keeps the training objective inside the **flow-matching / photon-density-transport** formulation. The core process is:
 
 ```text
 label/text condition + random optical seed + latent code
@@ -26,9 +26,9 @@ The corresponding PFM velocity interpretation is:
 X_Z=X_0+\int_0^Z \mathbf v_s(X_s)ds.
 ```
 
-## Why this version removes GAN loss
+## Training objective
 
-PFM is intended to be a photonic flow-matching paradigm, not an optical GAN. A discriminator can improve visual realism as an engineering trick, but it changes the conceptual training objective. This code therefore uses only PFM-consistent losses:
+The code uses PFM-consistent losses:
 
 - endpoint photon-density loss;
 - multi-scale image-density loss;
@@ -65,22 +65,22 @@ python -m pfm_mnist.train \
 
 ```bash
 python -m pfm_mnist.sample \
-  --ckpt runs/pfm_mnist_nogan/checkpoints/latest.pt \
+  --ckpt runs/pfm_mnist/checkpoints/latest.pt \
   --label all \
   --n-samples 40 \
-  --out-dir runs/pfm_mnist_nogan/samples
+  --out-dir runs/pfm_mnist/samples
 ```
 
 Photon-flow decoding:
 
 ```bash
 python -m pfm_mnist.sample \
-  --ckpt runs/pfm_mnist_nogan/checkpoints/latest.pt \
+  --ckpt runs/pfm_mnist/checkpoints/latest.pt \
   --label three \
   --n-samples 4 \
   --photon-decode \
   --n-photons 200000 \
-  --out-dir runs/pfm_mnist_nogan/photon
+  --out-dir runs/pfm_mnist/photon
 ```
 
 ## Project structure
