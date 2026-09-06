@@ -25,8 +25,8 @@ def endpoint_density_loss(
 ) -> torch.Tensor:
     """Distributional endpoint loss for normalized photon density.
 
-    It uses Hellinger distance plus weak symmetric KL. This is still a density
-    matching objective, not an adversarial objective.
+    It uses Hellinger distance plus weak symmetric KL to compare spatial
+    probability densities.
     """
     eps = 1e-8
     pred = normalize_sum(pred + eps)
@@ -88,8 +88,8 @@ def diversity_loss(
     """Latent-sensitive diversity regularizer.
 
     Same label with different latent/noise seeds should produce measurably
-    different photon-density patterns. This improves diversity without using a
-    discriminator or GAN objective.
+    different photon-density patterns. This encourages class-conditional sample
+    diversity through different phase-induced transport maps.
     """
     a = gaussian_blur(normalize_for_display(out_a), sigma=1.2)
     b = gaussian_blur(normalize_for_display(out_b), sigma=1.2)
@@ -150,7 +150,7 @@ def phase_gradient_flow_loss(
 
         v_z(r) = grad_perp phi_z(r) / k.
 
-    This term is the no-GAN replacement for distribution-level supervision.
+    This term directly supervises the optical velocity field.
     """
     if not velocity_phases:
         return torch.tensor(0.0, device=rho0.device)
