@@ -1,6 +1,6 @@
 seed: 42
 data_root: ./data
-run_dir: ./runs/pfm_mnist_diverse
+run_dir: ./runs/pfm_mnist_nogan
 
 model:
   size: 64
@@ -19,8 +19,7 @@ train:
   epochs: 80
   batch_size: 64
   num_workers: 2
-  lr_g: 2.0e-4
-  lr_d: 2.0e-4
+  lr: 2.0e-4
   weight_decay: 1.0e-4
   grad_clip: 1.0
   amp: false
@@ -28,16 +27,17 @@ train:
   save_every: 1
   t_min: 0.75
   pure_noise_prob: 0.45
-  d_steps: 1
 
 loss:
-  lambda_adv: 0.10
-  lambda_feature: 5.0
-  lambda_density: 0.25
-  lambda_diversity: 0.16
+  lambda_density: 1.0
+  lambda_multiscale: 0.35
+  lambda_flow: 0.08
+  lambda_tie: 0.02
+  lambda_diversity: 0.18
   lambda_ipr: 0.05
   lambda_peak: 0.03
   lambda_phase_tv: 1.5e-4
   target_floor: 1.0e-4
   target_blur_sigma: 0.6
   diversity_margin: 0.08
+  flow_samples: 256
