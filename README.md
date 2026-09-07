@@ -26,17 +26,57 @@ The corresponding PFM velocity interpretation is:
 X_Z=X_0+\int_0^Z \mathbf v_s(X_s)ds.
 ```
 
-## Training objective
+## Current training design
 
-The code uses PFM-consistent losses:
+The current version balances two goals:
 
-- endpoint photon-density loss;
-- multi-scale image-density loss;
-- phase-gradient flow-matching loss;
-- discrete TIE residual loss;
-- latent-sensitive diversity loss;
-- peak/IPR anti-collapse loss;
-- phase smoothness regularization.
+1. **Good MNIST generation quality.** The main losses follow the stable `pfm_mnist_v2.py` behavior: endpoint photon-density loss, multi-scale density loss, SSIM-style structural loss, peak/IPR anti-collapse loss, and phase smoothness regularization.
+2. **PFM theoretical consistency.** Phase-gradient flow matching and TIE residual losses are still implemented, but they are introduced only after a warm-up period and with small weights. This avoids the earlier failure mode where strong physics losses damaged image quality before the optical endpoint mapping had formed.
+
+The total objective is:
+
+```math
+\mathcal L=\lambda_d\mathcal L_{density}
++\lambda_m\mathcal L_{multi}
++\lambda_s\mathcal L_{SSIM}
++\lambda_f(t)\mathcal L_{flow}
++\lambda_{TIE}(t)\mathcal L_{TIE}
++\lambda_{div}(t)\mathcal L_{div}
++\mathcal L_{anti-collapse}
++\lambda_{TV}\mathcal L_{phase}.
+```
+
+The effective weights \(\lambda_f(t)\), \(\lambda_{TIE}(t)\), and \(\lambda_{div}(t)\) are ramped during training.
+
+## Important implementation details
+
+- The phase generator outputs one input-dependent phase stack per sample:
+
+```math
+\Phi_i=[\phi_{0,i},\psi_{1,i},\ldots,\psi_{L,i}].
+```
+
+- The optical forward model is differentiable angular-spectrum propagation:
+
+```math
+U_{l+1}=\mathcal F^{-1}\{\mathcal F[U_l\exp(i\psi_l)]H_{\Delta z}\}.
+```
+
+- The flow loss uses a cheap sliced-transport coupling instead of random point pairing. This gives a smoother target velocity:
+
+```math
+x_z=(1-\alpha)x_0+\alpha x_1,\qquad
+v_{target}=\frac{x_1-x_0}{L\Delta z}.
+```
+
+- The TIE residual is written as a stable finite-step continuity residual:
+
+```math
+\rho_{l+1}-\rho_l+
+\nabla_{pixel}\cdot\left(\rho_l\,\Delta x_{pixel}\right)=0,
+\qquad
+\Delta x_{pixel}=\frac{\Delta z}{k\Delta x}\nabla_\perp\phi_l.
+```
 
 ## Installation
 
@@ -52,13 +92,22 @@ pip install -e .
 python -m pfm_mnist.train --config configs/default.yaml
 ```
 
-For stronger diversity:
+For stronger diversity after the model can generate clear digits:
 
 ```bash
 python -m pfm_mnist.train \
   --config configs/default.yaml \
-  --lambda-diversity 0.25 \
-  --pure-noise-prob 0.60
+  --lambda-diversity 0.12 \
+  --pure-noise-prob 0.20
+```
+
+For a more theory-heavy run, increase the PFM physics weights carefully:
+
+```bash
+python -m pfm_mnist.train \
+  --config configs/default.yaml \
+  --lambda-flow 0.002 \
+  --lambda-tie 0.0002
 ```
 
 ## Sample
