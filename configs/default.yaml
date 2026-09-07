@@ -25,19 +25,37 @@ train:
   amp: false
   vis_every: 500
   save_every: 1
-  t_min: 0.75
-  pure_noise_prob: 0.45
+
+  # Stable generation first, physics guidance later.
+  # The model first learns a clean optical endpoint mapping, then gradually
+  # receives phase-gradient/TIE supervision. This is much more stable than
+  # enabling all physics losses from the first iteration.
+  t_min: 0.65
+  pure_noise_prob: 0.10
+  physics_start_epoch: 20
+  physics_ramp_epochs: 25
+  diversity_ramp_epochs: 10
 
 loss:
+  # Main image-quality losses, close to the stable pfm_mnist_v2 behavior.
   lambda_density: 1.0
   lambda_multiscale: 0.35
-  lambda_flow: 0.02
-  lambda_tie: 0.01
-  lambda_diversity: 0.16
+  lambda_ssim: 0.20
+
+  # PFM-theory losses. These are ramped in train.py, so the effective weight
+  # is zero during warm-up and reaches the values below after the ramp.
+  lambda_flow: 0.001
+  lambda_tie: 0.0001
+
+  # Diversity is kept moderate to avoid sacrificing digit quality.
+  lambda_diversity: 0.06
+  diversity_margin: 0.08
+
+  # Anti-collapse and phase regularization.
   lambda_ipr: 0.05
   lambda_peak: 0.03
-  lambda_phase_tv: 1.5e-4
+  lambda_phase_tv: 2.0e-4
+
   target_floor: 1.0e-4
   target_blur_sigma: 0.6
-  diversity_margin: 0.08
-  flow_samples: 256
+  flow_samples: 128
