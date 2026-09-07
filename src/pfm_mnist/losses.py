@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import torch
 import torch.nn.functional as F
 
@@ -12,6 +14,7 @@ def prepare_density_target(
     target_floor: float = 1e-4,
     blur_sigma: float = 0.6,
 ) -> torch.Tensor:
+    """Convert a target image into a normalized photon-density target."""
     target = gaussian_blur(target, blur_sigma)
     target = target + target_floor
     return normalize_sum(target)
@@ -25,8 +28,9 @@ def endpoint_density_loss(
 ) -> torch.Tensor:
     """Distributional endpoint loss for normalized photon density.
 
-    It uses Hellinger distance plus weak symmetric KL to compare spatial
-    probability densities.
+    Hellinger distance gives a stable probability-density objective, while weak
+    forward/reverse KL terms make the predicted density cover the digit strokes
+    without allowing large background hot spots.
     """
     eps = 1e-8
     pred = normalize_sum(pred + eps)
@@ -44,16 +48,46 @@ def multiscale_density_loss(
     target_floor: float = 1e-4,
     blur_sigma: float = 0.6,
 ) -> torch.Tensor:
-    """Multi-scale image-domain density loss.
-
-    This stabilizes the global digit shape and helps avoid single bright spots.
-    """
+    """Multi-scale image-domain density loss for global digit geometry."""
     pred = normalize_for_display(normalize_sum(pred))
     target = normalize_for_display(prepare_density_target(target, target_floor, blur_sigma))
+
     loss = 0.0
     for sigma, weight in [(0.0, 1.0), (1.0, 0.7), (2.0, 0.5), (4.0, 0.3)]:
         loss = loss + weight * F.l1_loss(gaussian_blur(pred, sigma), gaussian_blur(target, sigma))
     return loss
+
+
+def ssim_density_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    target_floor: float = 1e-4,
+    blur_sigma: float = 0.6,
+    window: int = 7,
+) -> torch.Tensor:
+    """SSIM-style structural loss restored from the stable v2 script.
+
+    MNIST is a structured sparse image. This term strongly improves digit
+    readability without changing the PFM optical forward model.
+    """
+    eps = 1e-8
+    pred = normalize_for_display(normalize_sum(pred))
+    target = normalize_for_display(prepare_density_target(target, target_floor, blur_sigma))
+
+    pad = window // 2
+    mu_x = F.avg_pool2d(pred, window, stride=1, padding=pad)
+    mu_y = F.avg_pool2d(target, window, stride=1, padding=pad)
+
+    sigma_x = F.avg_pool2d(pred * pred, window, stride=1, padding=pad) - mu_x * mu_x
+    sigma_y = F.avg_pool2d(target * target, window, stride=1, padding=pad) - mu_y * mu_y
+    sigma_xy = F.avg_pool2d(pred * target, window, stride=1, padding=pad) - mu_x * mu_y
+
+    c1 = 0.01**2
+    c2 = 0.03**2
+    ssim = ((2 * mu_x * mu_y + c1) * (2 * sigma_xy + c2)) / (
+        (mu_x**2 + mu_y**2 + c1) * (sigma_x + sigma_y + c2) + eps
+    )
+    return 1.0 - ssim.mean()
 
 
 def anti_collapse_loss(
@@ -88,8 +122,8 @@ def diversity_loss(
     """Latent-sensitive diversity regularizer.
 
     Same label with different latent/noise seeds should produce measurably
-    different photon-density patterns. This encourages class-conditional sample
-    diversity through different phase-induced transport maps.
+    different photon-density patterns. The loss is moderate by default and is
+    ramped in training so it does not destroy early digit formation.
     """
     a = gaussian_blur(normalize_for_display(out_a), sigma=1.2)
     b = gaussian_blur(normalize_for_display(out_b), sigma=1.2)
@@ -107,7 +141,7 @@ def _sample_points_from_density(density: torch.Tensor, num_points: int) -> torch
     """Sample normalized coordinates from a batch of spatial densities.
 
     Returns:
-        Tensor of shape [B, N, 2], ordered as (x_norm, y_norm) in [-1, 1].
+        [B, N, 2], ordered as (x_norm, y_norm) in [-1, 1].
     """
     with torch.no_grad():
         b, _, h, w = density.shape
@@ -124,6 +158,38 @@ def _sample_points_from_density(density: torch.Tensor, num_points: int) -> torch
         return torch.stack([x_norm, y_norm], dim=-1).clamp(-1, 1)
 
 
+def _projection_coupling(x0: torch.Tensor, x1: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Cheap sliced-transport coupling for flow supervision.
+
+    Independent random pairing produces a very noisy target velocity field. We
+    therefore sort both point clouds along a random projection and pair points
+    with the same rank. This is not a full OT solver, but it is a much smoother
+    approximation of a monotone transport plan and works well for MNIST.
+    """
+    b, _, _ = x0.shape
+    direction = torch.randn(b, 2, device=x0.device, dtype=x0.dtype)
+    direction = direction / (direction.norm(dim=1, keepdim=True) + 1e-8)
+
+    p0 = (x0 * direction[:, None, :]).sum(dim=-1)
+    p1 = (x1 * direction[:, None, :]).sum(dim=-1)
+    order0 = p0.argsort(dim=1)
+    order1 = p1.argsort(dim=1)
+
+    gather0 = order0[..., None].expand_as(x0)
+    gather1 = order1[..., None].expand_as(x1)
+    return torch.gather(x0, 1, gather0), torch.gather(x1, 1, gather1)
+
+
+def _sample_coupled_points(
+    rho0: torch.Tensor,
+    target_density: torch.Tensor,
+    num_points: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    x0 = _sample_points_from_density(rho0.detach(), num_points).to(rho0.device)
+    x1 = _sample_points_from_density(target_density.detach(), num_points).to(rho0.device)
+    return _projection_coupling(x0, x1)
+
+
 def _sample_field(field: torch.Tensor, points: torch.Tensor) -> torch.Tensor:
     """Bilinearly sample a field [B,C,H,W] at points [B,N,2]."""
     grid = points[:, :, None, :]
@@ -138,26 +204,29 @@ def phase_gradient_flow_loss(
     k: float,
     dx: float,
     dz: float,
-    num_samples: int = 256,
+    num_samples: int = 128,
     target_floor: float = 1e-4,
     blur_sigma: float = 0.6,
 ) -> torch.Tensor:
-    """Flow-matching loss on phase-induced optical velocity fields.
+    """PFM velocity loss on the phase-induced optical velocity field.
 
-    A point sampled from the initial optical density and a point sampled from
-    the target image density define a simple displacement path. We then match
-    the normalized phase-gradient velocity along this path:
+    We construct a displacement path from an initial photon-density sample x0
+    to a target-density sample x1:
 
-        v_z(r) = grad_perp phi_z(r) / k.
+        x_z = (1 - alpha) x0 + alpha x1,
+        v_target = (x1 - x0) / (L dz).
 
-    This term directly supervises the optical velocity field.
+    The sampled points are paired by a sliced-transport coupling rather than a
+    purely random pairing, which makes the target velocity smoother. The model
+    velocity is the normalized phase-gradient velocity:
+
+        v_pfm(r) = grad_perp phi(r) / k.
     """
     if not velocity_phases:
         return torch.tensor(0.0, device=rho0.device)
 
     target_density = prepare_density_target(target, target_floor, blur_sigma)
-    x0 = _sample_points_from_density(rho0.detach(), num_samples).to(rho0.device)
-    x1 = _sample_points_from_density(target_density.detach(), num_samples).to(rho0.device)
+    x0, x1 = _sample_coupled_points(rho0, target_density, num_samples)
 
     total_z = max(len(velocity_phases) * dz, 1e-12)
     target_velocity_norm = (x1 - x0) / total_z
@@ -200,10 +269,14 @@ def tie_residual_loss(
 ) -> torch.Tensor:
     """Discrete TIE residual for physics consistency.
 
-    The residual is evaluated in dimensionless pixel units for numerical
-    stability, but still follows the TIE structure:
+    Instead of dividing by dz and dx separately, we use a stable finite-step
+    continuity residual in pixel units:
 
-        d rho / dz + div(rho grad(phi)/k) = 0.
+        rho_{l+1} - rho_l + div_pixel(rho_l * Delta x_pixel) = 0,
+        Delta x_pixel = dz * grad(phi) / (k dx).
+
+    This keeps the TIE term useful as a weak physics regularizer without
+    overwhelming the endpoint image objective.
     """
     if len(intensities) < 2 or not velocity_phases:
         return torch.tensor(0.0, device=intensities[0].device)
@@ -211,12 +284,11 @@ def tie_residual_loss(
     loss = 0.0
     for rho_l, rho_next, phase in zip(intensities[:-1], intensities[1:], velocity_phases):
         gx, gy = phase_gradient(phase, dx)
-        vx = gx / k / dx
-        vy = gy / k / dx
-        flux_x = rho_l * vx
-        flux_y = rho_l * vy
+        disp_x_pix = dz * gx / k / dx
+        disp_y_pix = dz * gy / k / dx
+        flux_x = rho_l * disp_x_pix
+        flux_y = rho_l * disp_y_pix
         div = _central_diff_x(flux_x) + _central_diff_y(flux_y)
-        drho = (rho_next - rho_l) / max(dz, 1e-12)
-        residual = drho + div
+        residual = (rho_next - rho_l) + div
         loss = loss + residual.pow(2).mean()
     return loss / len(velocity_phases)
